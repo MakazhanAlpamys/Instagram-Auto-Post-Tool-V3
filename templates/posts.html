@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+
+{% block title %}Посты - Instagram Auto Post Tool V3{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Посты</h1>
+    <p class="page-subtitle">Управление черновиками, запланированными и опубликованными постами</p>
+</div>
+
+<div class="card">
+    <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+        <button class="btn btn-primary" onclick="filterPosts('all')">Все</button>
+        <button class="btn btn-secondary" onclick="filterPosts('draft')">Черновики</button>
+        <button class="btn btn-secondary" onclick="filterPosts('scheduled')">Запланированы</button>
+        <button class="btn btn-secondary" onclick="filterPosts('published')">Опубликованы</button>
+    </div>
+    
+    <div id="postsList"></div>
+</div>
+
+<!-- Модальное окно редактирования -->
+<div id="editModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; overflow-y: auto; padding: 20px;">
+    <div class="card" style="width: 700px; max-width: 100%; margin: auto;">
+        <h2 class="card-title">Редактирование поста</h2>
+        
+        <div class="form-group">
+            <label class="form-label">Медиа (фото/видео)</label>
+            <div id="editImagePreview" style="width: 100%; height: 300px; background: var(--bg-tertiary); border-radius: 8px; background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center; overflow: hidden;"></div>
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">Текст поста</label>
+            <textarea class="form-textarea" id="editText" style="min-height: 200px;"></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">Время публикации</label>
+            <input type="datetime-local" class="form-input" id="editScheduledTime">
+        </div>
+        
+        <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" onclick="savePost()" id="saveBtn">Сохранить</button>
+            <button class="btn btn-success" onclick="publishPostNow()" id="publishNowBtn">Опубликовать сейчас</button>
+            <button class="btn btn-secondary" onclick="closeEditModal()">Отмена</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allPosts = [];
+    let currentFilter = 'all';
+    let editingPostId = null;
+    
+    // Функция для определения типа медиа по расширению
+    function getMediaUrl(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        if (['mp4', 'mov', 'avi', 'webm'].includes(ext)) {
+            return `/api/videos/${filename}`;
+        }
+        return `/api/photos/${filename}`;
+    }
+    
+    // Функция для отображения медиа (фото или видео)
+    function getMediaDisplay(filename, format) {
+        const ext = filename.split('.').pop().toLowerCase();
+        if (['mp4', 'mov', 'avi', 'webm'].includes(ext)) {
+            return ''; // Для видео не нужен background-image
+        }
+        return `background-image: url('${getMediaUrl(filename)}'); background-size: cover; background-position: center;`;
+    }
+    
+    // Функция для создания элемента медиа
+    function getMediaElement(filename, format) {
+        const ext = filename.split('.').pop().toLowerCase();
+        if (['mp4', 'mov', 'avi', 'webm'].includes(ext)) {
+            return `<video src="${getMediaUrl(filename)}" style="width: 100%; height: 100%; object-fit: cover;" muted loop autoplay></video>`;
+        }
+        return ''; // Для фото используем background-image
+    }
+    
+    async function loadPosts(status = null) {
+        try {
+            const url = status ? `/api/posts?status=${status}` : '/api/posts';
+            const data = await apiRequest(url);
+            allPosts = data.posts;
+            renderPosts();
+        } catch (error) {
+            showToast('Ошибка загрузки постов: ' + error.message, 'error');
+        }
+    }
+    
+    function filterPosts(filter) {
+        currentFilter = filter;
+        
+        // Обновляем кнопки
+        document.querySelectorAll('.card button').forEach(btn => {
+            btn.className = 'btn btn-secondary';
+        });
+        event.target.className = 'btn btn-primary';
+        
+        if (filter === 'all') {
+            loadPosts();
+        } else {
+            loadPosts(filter);
+        }
+    }
+    
+    function renderPosts() {
+        const container = document.getElementById('postsList');
+        
+        if (allPosts.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 40px;">Нет постов</p>';
+            return;
+        }
+        
+        container.innerHTML = allPosts.map(post => {
+            const statusColor = {
+                'draft': 'var(--text-secondary)',
+                'scheduled': 'var(--warning)',
+                'published': 'var(--success)',
+                'error': 'var(--error)'
+            }[post.status];
+            
+            const statusText = {
+                'draft': '📝 Черновик',
+                'scheduled': '🟡 Запланирован',
+                'published': '🟢 Опубликован',
+                'error': '❌ Ошибка'
+            }[post.status];
+            
+            const timeText = post.status === 'scheduled' 
+                ? `на ${new Date(post.scheduled_time).toLocaleString('ru-RU')}`
+                : post.status === 'published'
+                ? `в ${new Date(post.published_at).toLocaleString('ru-RU')}`
+                : '';
+            
+            return `
+                <div class="card" style="margin-bottom: 16px;">
+                    <div style="display: flex; gap: 20px;">
+                        <div style="width: 150px; height: 150px; background: var(--bg-tertiary); border-radius: 8px; ${getMediaDisplay(post.media[0], post.format)} flex-shrink: 0; position: relative; overflow: hidden;">
+                            ${getMediaElement(post.media[0], post.format)}
+                        </div>
+                        
+                        <div style="flex: 1;">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                                <div>
+                                    <div style="color: ${statusColor}; font-weight: 600; margin-bottom: 4px;">
+                                        ${statusText} ${timeText}
+                                    </div>
+                                    <div style="font-size: 12px; color: var(--text-secondary);">
+                                        Создано: ${new Date(post.created_at).toLocaleString('ru-RU')}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <p style="color: var(--text-secondary); font-size: 14px; line-height: 1.6; margin-bottom: 12px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">
+                                ${post.text}
+                            </p>
+                            
+                            ${post.status === 'error' ? `
+                                <div style="color: var(--error); font-size: 12px; padding: 8px; background: rgba(255,59,48,0.1); border-radius: 4px; margin-bottom: 12px;">
+                                    Ошибка: ${post.error}
+                                </div>
+                            ` : ''}
+                            
+                            <div style="display: flex; gap: 8px;">
+                                ${post.status !== 'published' ? `
+                                    <button class="btn btn-primary" onclick="editPost('${post.id}')">✏️ Редактировать</button>
+                                ` : `
+                                    <button class="btn btn-secondary" onclick="viewPost('${post.id}')">👁️ Просмотр</button>
+                                `}
+                                <button class="btn btn-danger" onclick="confirmDeletePost('${post.id}')">🗑️ Удалить</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    async function editPost(postId) {
+        try {
+            const data = await apiRequest(`/api/posts/${postId}`);
+            const post = data.post;
+            
+            editingPostId = postId;
+            
+            document.getElementById('editText').value = post.text;
+            
+            // Показываем медиа (фото или видео)
+            const preview = document.getElementById('editImagePreview');
+            const filename = post.media[0];
+            const ext = filename.split('.').pop().toLowerCase();
+            
+            if (['mp4', 'mov', 'avi', 'webm'].includes(ext)) {
+                // Видео
+                preview.style.backgroundImage = 'none';
+                preview.innerHTML = `<video src="${getMediaUrl(filename)}" style="width: 100%; height: 100%; object-fit: contain;" controls></video>`;
+            } else {
+                // Фото
+                preview.innerHTML = '';
+                preview.style.backgroundImage = `url('${getMediaUrl(filename)}')`;
+            }
+            
+            if (post.scheduled_time) {
+                const date = new Date(post.scheduled_time);
+                document.getElementById('editScheduledTime').value = date.toISOString().slice(0, 16);
+            }
+            
+            document.getElementById('editModal').style.display = 'flex';
+            
+        } catch (error) {
+            showToast('Ошибка: ' + error.message, 'error');
+        }
+    }
+    
+    function viewPost(postId) {
+        editPost(postId);
+        // Делаем все поля только для чтения
+        document.getElementById('editText').disabled = true;
+        document.querySelectorAll('#editModal .btn-primary, #editModal .btn-danger').forEach(btn => {
+            btn.style.display = 'none';
+        });
+    }
+    
+    function closeEditModal() {
+        document.getElementById('editModal').style.display = 'none';
+        document.getElementById('editText').disabled = false;
+        
+        // Восстанавливаем кнопки
+        const saveBtn = document.getElementById('saveBtn');
+        const publishBtn = document.getElementById('publishNowBtn');
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Сохранить';
+        }
+        if (publishBtn) {
+            publishBtn.disabled = false;
+            publishBtn.textContent = 'Опубликовать сейчас';
+        }
+        
+        editingPostId = null;
+    }
+    
+    async function savePost() {
+        if (!editingPostId) return;
+        
+        const saveBtn = document.getElementById('saveBtn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = '⏳ Сохранение...';
+        
+        try {
+            const scheduledTimeInput = document.getElementById('editScheduledTime').value;
+            
+            const updates = {
+                text: document.getElementById('editText').value,
+                scheduled_time: scheduledTimeInput || null
+            };
+            
+            // Обновляем статус на scheduled если задано время
+            if (scheduledTimeInput) {
+                updates.status = 'scheduled';
+            }
+            
+            await apiRequest(`/api/posts/${editingPostId}`, {
+                method: 'PUT',
+                body: JSON.stringify(updates)
+            });
+            
+            showToast('Пост обновлен', 'success');
+            closeEditModal();
+            loadPosts(currentFilter === 'all' ? null : currentFilter);
+            
+        } catch (error) {
+            showToast('Ошибка: ' + error.message, 'error');
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Сохранить';
+        }
+    }
+    
+    async function publishPostNow() {
+        if (!editingPostId) return;
+        
+        if (!confirm('Опубликовать пост прямо сейчас?')) return;
+        
+        const publishBtn = document.getElementById('publishNowBtn');
+        publishBtn.disabled = true;
+        publishBtn.textContent = '🔄 Публикация...';
+        
+        try {
+            await apiRequest(`/api/posts/${editingPostId}/publish-now`, { method: 'POST' });
+            showToast('Пост опубликован!', 'success');
+            closeEditModal();
+            loadPosts(currentFilter === 'all' ? null : currentFilter);
+        } catch (error) {
+            showToast('Ошибка публикации: ' + error.message, 'error');
+        } finally {
+            publishBtn.disabled = false;
+            publishBtn.textContent = 'Опубликовать сейчас';
+        }
+    }
+    
+    async function confirmDeletePost(postId) {
+        if (!confirm('Удалить этот пост?')) return;
+        
+        showLoading();
+        
+        try {
+            await apiRequest(`/api/posts/${postId}`, { method: 'DELETE' });
+            showToast('Пост удален', 'success');
+            
+            if (editingPostId === postId) {
+                closeEditModal();
+            }
+            
+            loadPosts(currentFilter === 'all' ? null : currentFilter);
+        } catch (error) {
+            showToast('Ошибка: ' + error.message, 'error');
+        } finally {
+            hideLoading();
+        }
+    }
+    
+    
+    loadPosts();
+</script>
+{% endblock %}

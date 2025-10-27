@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Логи - Instagram Auto Post Tool V3{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <h1 class="page-title">📋 Логи приложения</h1>
+        <p class="page-subtitle">История операций и событий</p>
+    </div>
+    <button class="btn btn-secondary" onclick="loadLogs()">🔄 Обновить</button>
+</div>
+
+<div class="card">
+    <div id="logsList" style="font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.8; max-height: 600px; overflow-y: auto; background: var(--bg-primary); padding: 16px; border-radius: 8px;"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadLogs() {
+        try {
+            const data = await apiRequest('/api/logs?limit=200');
+            const container = document.getElementById('logsList');
+            
+            if (data.logs.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-secondary);">Нет логов</p>';
+                return;
+            }
+            
+            container.innerHTML = data.logs.join('');
+            container.scrollTop = container.scrollHeight;
+            
+        } catch (error) {
+            showToast('Ошибка загрузки логов: ' + error.message, 'error');
+        }
+    }
+    
+    loadLogs();
+    
+    // Автообновление каждые 10 секунд
+    setInterval(loadLogs, 10000);
+</script>
+{% endblock %}

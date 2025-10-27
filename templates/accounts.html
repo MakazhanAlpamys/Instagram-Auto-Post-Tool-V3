@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Аккаунты - Instagram Auto Post Tool V3{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <h1 class="page-title">Управление аккаунтами</h1>
+        <p class="page-subtitle">Добавляйте и управляйте Instagram аккаунтами</p>
+    </div>
+    <button class="btn btn-primary" onclick="showAddAccountModal()">➕ Добавить аккаунт</button>
+</div>
+
+<div id="accountsList"></div>
+
+<!-- Модальное окно добавления аккаунта -->
+<div id="addAccountModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center;">
+    <div class="card" style="width: 500px; max-width: 90%;">
+        <h2 class="card-title">Добавить аккаунт</h2>
+        <form id="addAccountForm">
+            <div class="form-group">
+                <label class="form-label">Username</label>
+                <input type="text" class="form-input" id="username" placeholder="username (без @)" required>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Пароль</label>
+                <input type="password" class="form-input" id="password" required>
+            </div>
+            
+            <p style="color: var(--text-secondary); font-size: 14px; margin-top: -8px;">
+                💡 Тему, язык, формат и количество постов настроите через AI-планировщик
+            </p>
+            
+            <div style="display: flex; gap: 12px; margin-top: 24px;">
+                <button type="submit" class="btn btn-primary" style="flex: 1;">Добавить</button>
+                <button type="button" class="btn btn-secondary" onclick="hideAddAccountModal()">Отмена</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let accounts = [];
+    
+    function showAddAccountModal() {
+        document.getElementById('addAccountModal').style.display = 'flex';
+    }
+    
+    function hideAddAccountModal() {
+        document.getElementById('addAccountModal').style.display = 'none';
+        document.getElementById('addAccountForm').reset();
+    }
+    
+    async function loadAccounts() {
+        try {
+            const data = await apiRequest('/api/accounts');
+            accounts = data.accounts;
+            renderAccounts();
+        } catch (error) {
+            showToast('Ошибка загрузки аккаунтов: ' + error.message, 'error');
+        }
+    }
+    
+    function renderAccounts() {
+        const container = document.getElementById('accountsList');
+        
+        if (accounts.length === 0) {
+            container.innerHTML = '<div class="card"><p style="color: var(--text-secondary); text-align: center;">Нет аккаунтов. Добавьте первый аккаунт, чтобы начать работу.</p></div>';
+            return;
+        }
+        
+        container.innerHTML = accounts.map(acc => `
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <h3 style="font-size: 20px; font-weight: 600;">${acc.username}</h3>
+                            <span class="status-badge status-${acc.status}">
+                                ${acc.status === 'active' ? '✅ Активен' : 
+                                  acc.status === 'error' ? '❌ Ошибка' :
+                                  acc.status === 'logging_in' ? '🔄 Попытка входа...' : '⏸️ Неактивен'}
+                            </span>
+                        </div>
+                        ${acc.last_login ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 8px;">Последний вход: ${new Date(acc.last_login).toLocaleString('ru-RU')}</div>` : ''}
+                    </div>
+                    
+                    <div style="display: flex; gap: 8px;">
+                        ${acc.status === 'active' ? 
+                            `<button class="btn btn-secondary" onclick="logoutAccount('${acc.id}')">Выход</button>` :
+                            `<button class="btn btn-primary" onclick="loginAccount('${acc.id}')">Войти</button>`
+                        }
+                        <button class="btn btn-danger" onclick="deleteAccount('${acc.id}', '${acc.username}')">Удалить</button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    document.getElementById('addAccountForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const data = {
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value
+        };
+        
+        showLoading();
+        
+        try {
+            await apiRequest('/api/accounts', {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+            
+            showToast('Аккаунт добавлен успешно!', 'success');
+            hideAddAccountModal();
+            loadAccounts();
+        } catch (error) {
+            showToast('Ошибка: ' + error.message, 'error');
+        } finally {
+            hideLoading();
+        }
+    });
+    
+    async function loginAccount(accountId) {
+        showLoading();
+        
+        try {
+            await apiRequest(`/api/accounts/${accountId}/login`, { method: 'POST' });
+            showToast('Вход выполнен успешно!', 'success');
+            loadAccounts();
+        } catch (error) {
+            showToast('Ошибка входа: ' + error.message, 'error');
+        } finally {
+            hideLoading();
+        }
+    }
+    
+    async function logoutAccount(accountId) {
+        try {
+            await apiRequest(`/api/accounts/${accountId}/logout`, { method: 'POST' });
+            showToast('Выход выполнен', 'success');
+            loadAccounts();
+        } catch (error) {
+            showToast('Ошибка: ' + error.message, 'error');
+        }
+    }
+    
+    async function deleteAccount(accountId, username) {
+        if (!confirm(`Вы уверены, что хотите удалить аккаунт ${username}?`)) {
+            return;
+        }
+        
+        showLoading();
+        
+        try {
+            await apiRequest(`/api/accounts/${accountId}`, { method: 'DELETE' });
+            showToast('Аккаунт удален', 'success');
+            loadAccounts();
+        } catch (error) {
+            showToast('Ошибка: ' + error.message, 'error');
+        } finally {
+            hideLoading();
+        }
+    }
+    
+    loadAccounts();
+</script>
+{% endblock %}

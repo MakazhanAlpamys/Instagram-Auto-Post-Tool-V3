@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Библиотека - Instagram Auto Post Tool V3{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">🖼️ Библиотека медиа</h1>
+    <p class="page-subtitle">Все сгенерированные изображения и видео</p>
+</div>
+
+<div class="card">
+    <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+        <button class="btn btn-primary" onclick="filterMedia('all')">Все</button>
+        <button class="btn btn-secondary" onclick="filterMedia('photos')">Фото</button>
+        <button class="btn btn-secondary" onclick="filterMedia('videos')">Видео</button>
+    </div>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px;" id="mediaGrid"></div>
+</div>
+
+<!-- Модальное окно просмотра -->
+<div id="viewModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; padding: 20px; overflow-y: auto;" onclick="closeViewModal()">
+    <div class="card" style="max-width: 700px; width: 100%; max-height: 90vh; overflow-y: auto;" onclick="event.stopPropagation()">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2 class="card-title" style="margin: 0;" id="viewTitle">Медиа</h2>
+            <button class="btn btn-secondary" onclick="closeViewModal()">✕ Закрыть</button>
+        </div>
+        
+        <div id="viewContent" style="margin-bottom: 20px; max-height: 400px; overflow: hidden; border-radius: 8px;"></div>
+        
+        <div class="form-group">
+            <label class="form-label">Промпт:</label>
+            <textarea class="form-textarea" id="viewPrompt" readonly style="min-height: 100px; background: var(--bg-primary);"></textarea>
+        </div>
+        
+        <div id="viewMetadata" style="font-size: 12px; color: var(--text-secondary);"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allMedia = [];
+    let currentFilter = 'all';
+    
+    async function loadMedia() {
+        try {
+            showLoading();
+            
+            // Загружаем список медиафайлов
+            const photosResponse = await fetch('/api/media/photos');
+            const videosResponse = await fetch('/api/media/videos');
+            
+            if (photosResponse.ok && videosResponse.ok) {
+                const photos = await photosResponse.json();
+                const videos = await videosResponse.json();
+                
+                allMedia = [
+                    ...photos.files.map(f => ({...f, type: 'photo'})),
+                    ...videos.files.map(f => ({...f, type: 'video'}))
+                ];
+                
+                // Сортируем по дате (новые сверху)
+                allMedia.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                
+                renderMedia();
+            } else {
+                showToast('Ошибка загрузки медиа', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading media:', error);
+            showToast('Ошибка загрузки медиа', 'error');
+        } finally {
+            hideLoading();
+        }
+    }
+    
+    function filterMedia(filter) {
+        currentFilter = filter;
+        
+        // Обновляем кнопки
+        document.querySelectorAll('.card button').forEach(btn => {
+            btn.className = 'btn btn-secondary';
+        });
+        event.target.className = 'btn btn-primary';
+        
+        renderMedia();
+    }
+    
+    function renderMedia() {
+        const container = document.getElementById('mediaGrid');
+        
+        let filteredMedia = allMedia;
+        if (currentFilter === 'photos') {
+            filteredMedia = allMedia.filter(m => m.type === 'photo');
+        } else if (currentFilter === 'videos') {
+            filteredMedia = allMedia.filter(m => m.type === 'video');
+        }
+        
+        if (filteredMedia.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 40px; grid-column: 1/-1;">Нет медиафайлов</p>';
+            return;
+        }
+        
+        container.innerHTML = filteredMedia.map(media => {
+            const url = media.type === 'photo' ? `/api/photos/${media.filename}` : `/api/videos/${media.filename}`;
+            const icon = media.type === 'photo' ? '📷' : '🎥';
+            const preview = media.type === 'photo' 
+                ? `<div style="width: 100%; height: 200px; background-image: url('${url}'); background-size: cover; background-position: center; border-radius: 8px;"></div>`
+                : `<video src="${url}" style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px;" muted></video>`;
+            
+            const date = formatDateShort(media.timestamp);
+            
+            return `
+                <div class="card" style="padding: 12px; cursor: pointer; transition: transform 0.2s;" 
+                     onmouseover="this.style.transform='scale(1.05)'" 
+                     onmouseout="this.style.transform='scale(1)'"
+                     onclick="viewMedia('${media.filename}', '${media.type}')">
+                    ${preview}
+                    <div style="margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="font-size: 12px; font-weight: 600;">${icon} ${media.type === 'photo' ? 'Фото' : 'Видео'}</span>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">
+                            📅 ${date}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    async function viewMedia(filename, type) {
+        try {
+            const url = type === 'photo' ? `/api/photos/${filename}` : `/api/videos/${filename}`;
+            const metadataUrl = type === 'photo' 
+                ? `/api/media/photos/${filename}/metadata`
+                : `/api/media/videos/${filename}/metadata`;
+            
+            // Показываем модальное окно
+            document.getElementById('viewModal').style.display = 'flex';
+            document.getElementById('viewTitle').textContent = type === 'photo' ? '📷 Фото' : '🎥 Видео';
+            
+            // Отображаем медиа
+            const content = document.getElementById('viewContent');
+            if (type === 'photo') {
+                content.innerHTML = `<img src="${url}" style="width: 100%; height: auto; max-height: 400px; object-fit: contain; border-radius: 8px;">`;
+            } else {
+                content.innerHTML = `<video src="${url}" controls style="width: 100%; max-height: 400px; border-radius: 8px;"></video>`;
+            }
+            
+            // Загружаем метаданные
+            const metaResponse = await fetch(metadataUrl);
+            if (metaResponse.ok) {
+                const metadata = await metaResponse.json();
+                
+                document.getElementById('viewPrompt').value = metadata.prompt || 'Промпт не найден';
+                
+                let metaHtml = `<strong>Создано:</strong> ${formatDate(metadata.timestamp)}<br>`;
+                if (type === 'photo') {
+                    metaHtml += `<strong>Модель:</strong> ${metadata.model || 'N/A'}<br>`;
+                    metaHtml += `<strong>Размер:</strong> ${metadata.width}x${metadata.height}px`;
+                } else {
+                    metaHtml += `<strong>Модель:</strong> ${metadata.model || 'N/A'}<br>`;
+                    metaHtml += `<strong>Длительность:</strong> ${metadata.duration || 'N/A'} сек<br>`;
+                    metaHtml += `<strong>Режим:</strong> ${metadata.mode || 'N/A'}`;
+                }
+                
+                document.getElementById('viewMetadata').innerHTML = metaHtml;
+            } else {
+                document.getElementById('viewPrompt').value = 'Метаданные не найдены';
+                document.getElementById('viewMetadata').innerHTML = '';
+            }
+            
+        } catch (error) {
+            showToast('Ошибка загрузки информации', 'error');
+        }
+    }
+    
+    function closeViewModal() {
+        document.getElementById('viewModal').style.display = 'none';
+    }
+    
+    function formatDate(timestamp) {
+        if (!timestamp) return 'N/A';
+        try {
+            // Парсим формат: 20251025_122147_677059
+            const dateStr = timestamp.substring(0, 8); // 20251025
+            const timeStr = timestamp.substring(9, 15); // 122147
+            
+            const year = dateStr.substring(0, 4);
+            const month = dateStr.substring(4, 6);
+            const day = dateStr.substring(6, 8);
+            const hour = timeStr.substring(0, 2);
+            const minute = timeStr.substring(2, 4);
+            
+            return `${day}.${month}.${year} ${hour}:${minute}`;
+        } catch (e) {
+            return 'N/A';
+        }
+    }
+    
+    function formatDateShort(timestamp) {
+        if (!timestamp) return 'N/A';
+        try {
+            // Парсим формат: 20251025_122147_677059
+            const dateStr = timestamp.substring(0, 8); // 20251025
+            const timeStr = timestamp.substring(9, 15); // 122147
+            
+            const day = dateStr.substring(6, 8);
+            const month = dateStr.substring(4, 6);
+            const hour = timeStr.substring(0, 2);
+            const minute = timeStr.substring(2, 4);
+            
+            return `${day}.${month} ${hour}:${minute}`;
+        } catch (e) {
+            return 'N/A';
+        }
+    }
+    
+    loadMedia();
+</script>
+{% endblock %}

@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}AI-Планировщик - Instagram Auto Post Tool V3{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">🤖 AI-Планировщик</h1>
+    <p class="page-subtitle">Создайте план публикаций с помощью искусственного интеллекта</p>
+</div>
+
+<div class="card">
+    <h2 class="card-title">Инструкция для AI</h2>
+    <p style="color: var(--text-secondary); margin-bottom: 20px;">
+        Опишите, что вы хотите постить и AI создаст полный план публикаций
+    </p>
+    
+    <div class="form-group">
+        <label class="form-label">Примеры инструкций:</label>
+        <div style="background: var(--bg-tertiary); padding: 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; line-height: 1.8;">
+            <div>📌 Постить про спорт на русском на @sportblog_kz и @fitness_astana</div>
+            <div>📌 Делать по 5 постов в день на каждом аккаунте</div>
+            <div>📌 Формат: фото</div>
+            <br>
+            <div>📌 Постить про музыку на казахском на @music_almaty</div>
+            <div>📌 3 поста в день, формат видео</div>
+        </div>
+        
+        <textarea 
+            class="form-textarea" 
+            id="instruction" 
+            placeholder="Введите вашу инструкцию здесь..."
+            style="min-height: 200px;"
+        ></textarea>
+    </div>
+    
+    <button class="btn btn-primary" onclick="createPlan()" style="width: 100%;">
+        🤖 Создать план с AI
+    </button>
+</div>
+
+<div id="planPreview" style="display: none;">
+    <div class="card">
+        <h2 class="card-title">📋 План создан</h2>
+        <div id="planContent"></div>
+        
+        <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-success" onclick="generatePosts()" style="flex: 1;" id="generateBtn">
+                🚀 Начать генерацию
+            </button>
+            <button class="btn btn-secondary" onclick="editPlan()">
+                ✏️ Редактировать
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="generationProgress" style="display: none;">
+    <div class="card">
+        <h2 class="card-title">🔄 Генерация постов...</h2>
+        
+        <div style="margin: 20px 0;">
+            <div style="background: var(--bg-tertiary); height: 8px; border-radius: 4px; overflow: hidden;">
+                <div id="progressBar" style="background: var(--accent); height: 100%; width: 0%; transition: width 0.3s;"></div>
+            </div>
+            <div style="text-align: center; margin-top: 12px; color: var(--text-secondary);" id="progressText">
+                Подготовка...
+            </div>
+        </div>
+        
+        <div id="progressDetails" style="font-family: monospace; font-size: 13px; max-height: 200px; overflow-y: auto; background: var(--bg-primary); padding: 12px; border-radius: 8px;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentPlan = null;
+    
+    async function createPlan() {
+        const instruction = document.getElementById('instruction').value.trim();
+        
+        if (!instruction) {
+            showToast('Введите инструкцию', 'error');
+            return;
+        }
+        
+        showLoading();
+        
+        try {
+            const data = await apiRequest('/api/ai/create-plan', {
+                method: 'POST',
+                body: JSON.stringify({ instruction })
+            });
+            
+            currentPlan = data.plan;
+            displayPlan(currentPlan);
+            showToast('План успешно создан!', 'success');
+            
+        } catch (error) {
+            showToast('Ошибка создания плана: ' + error.message, 'error');
+        } finally {
+            hideLoading();
+        }
+    }
+    
+    function displayPlan(plan) {
+        const preview = document.getElementById('planPreview');
+        const content = document.getElementById('planContent');
+        
+        let html = '<div style="border: 2px solid var(--accent); border-radius: 8px; padding: 20px; background: var(--bg-primary);">';
+        
+        plan.accounts.forEach(acc => {
+            html += `
+                <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border);">
+                    <h3 style="font-size: 18px; margin-bottom: 12px;">${acc.username}</h3>
+                    <ul style="list-style: none; padding-left: 0;">
+                        <li>• <strong>Тема:</strong> ${acc.theme}</li>
+                        <li>• <strong>Язык:</strong> ${acc.language}</li>
+                        <li>• <strong>Постов в день:</strong> ${acc.posts_per_day}</li>
+                        <li>• <strong>Формат:</strong> ${acc.format === 'photo' ? '📷 Фото' : '🎥 Видео'}</li>
+                        <li>• <strong>Ключевые слова:</strong> ${acc.keywords.join(', ')}</li>
+                    </ul>
+                </div>
+            `;
+        });
+        
+        html += `
+            <div style="text-align: center; padding-top: 20px; font-size: 18px;">
+                <strong>Всего постов:</strong> ${plan.total_posts}
+            </div>
+        </div>`;
+        
+        content.innerHTML = html;
+        preview.style.display = 'block';
+        
+        // Прокрутка к превью
+        preview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    
+    function editPlan() {
+        document.getElementById('planPreview').style.display = 'none';
+        document.getElementById('instruction').focus();
+    }
+    
+    async function generatePosts() {
+        if (!currentPlan) {
+            showToast('Нет плана для генерации', 'error');
+            return;
+        }
+        
+        // БЛОКИРУЕМ кнопку генерации
+        const generateBtn = document.getElementById('generateBtn');
+        generateBtn.disabled = true;
+        generateBtn.textContent = '⏳ Генерация...';
+        
+        // Скрываем превью и показываем прогресс
+        document.getElementById('planPreview').style.display = 'none';
+        document.getElementById('generationProgress').style.display = 'block';
+        
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const progressDetails = document.getElementById('progressDetails');
+        
+        try {
+            progressText.textContent = 'Генерация контента...';
+            progressDetails.innerHTML = '';
+            
+            // Запускаем генерацию
+            const data = await apiRequest('/api/ai/generate-posts', {
+                method: 'POST',
+                body: JSON.stringify({ plan: currentPlan })
+            });
+            
+            // Симуляция прогресса (в реальности нужен WebSocket или polling)
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += 5;
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    progressBar.style.width = '100%';
+                    progressText.textContent = 'Генерация завершена!';
+                    progressDetails.innerHTML += `<div style="color: var(--success);">✅ ${data.message}</div>`;
+                    
+                    setTimeout(() => {
+                        showToast('Посты созданы и запланированы!', 'success');
+                        window.location.href = '/posts';
+                    }, 2000);
+                } else {
+                    progressBar.style.width = progress + '%';
+                    progressText.textContent = `Сгенерировано ${Math.floor(progress / 100 * currentPlan.total_posts)}/${currentPlan.total_posts} постов`;
+                    
+                    if (progress % 20 === 0) {
+                        progressDetails.innerHTML += `<div>⏳ Генерация поста ${Math.floor(progress / 100 * currentPlan.total_posts)}...</div>`;
+                        progressDetails.scrollTop = progressDetails.scrollHeight;
+                    }
+                }
+            }, 500);
+            
+        } catch (error) {
+            showToast('Ошибка генерации: ' + error.message, 'error');
+            progressDetails.innerHTML += `<div style="color: var(--error);">❌ Ошибка: ${error.message}</div>`;
+        }
+    }
+</script>
+{% endblock %}
