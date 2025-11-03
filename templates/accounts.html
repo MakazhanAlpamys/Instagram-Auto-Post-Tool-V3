@@ -11,7 +11,10 @@
     <button class="btn btn-primary" onclick="showAddAccountModal()">➕ Добавить аккаунт</button>
 </div>
 
-<div id="accountsList"></div>
+<div id="accountsScroll" style="max-height: calc(100vh - 220px); overflow-y: auto; padding-right: 4px;">
+    <div id="accountsList"></div>
+    
+</div>
 
 <!-- Модальное окно добавления аккаунта -->
 <div id="addAccountModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center;">
