@@ -15,7 +15,9 @@
         <button class="btn btn-secondary" onclick="filterMedia('videos')">Видео</button>
     </div>
     
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px;" id="mediaGrid"></div>
+    <div style="max-height: calc(100vh - 300px); overflow-y: auto; padding-right: 4px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px;" id="mediaGrid"></div>
+    </div>
 </div>
 
 <!-- Модальное окно просмотра -->
